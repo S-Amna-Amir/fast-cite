@@ -3,5 +3,6 @@ venv/
 env/
 .env
 .env.example
+.gitignore
 
 */__pycache__/
