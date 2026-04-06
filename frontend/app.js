@@ -1,5 +1,5 @@
 // ─── Config ─────────────────────────────────────────────────────────────────
-const API_URL = 'http://localhost:8000/ask'; // Change to deployed URL when ready
+const API_URL = 'http://localhost:8002/ask'; 
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let isLoading = false;
@@ -243,6 +243,22 @@ function formatAnswer(text) {
 // Delete or disable this once the backend is running.
 function getMockResponse(query) {
   const q = query.toLowerCase();
+
+  if (q.includes('ntn') && (q.includes('document') || q.includes('required') || q.includes('what do i need'))) {
+    return {
+      answer: "To register for an **NTN (National Tax Number)** with FBR, you need the following documents ready before starting the online process.",
+      steps: [
+        "Original CNIC (Computerized National Identity Card)",
+        "Active mobile number registered against your CNIC",
+        "Personal email address",
+        "Residential address details",
+        "Business address (if registering as a business)",
+        "Bank account number (optional but recommended)"
+      ],
+      source: "Source: FBR (Federal Board of Revenue)",
+      warning: "All registration is done online via the FBR IRIS portal — no physical documents need to be submitted for individual NTN."
+    };
+  }
 
   if (q.includes('ntn') && (q.includes('freelan') || q.includes('need'))) {
     return {

@@ -7,9 +7,16 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 
 from app.config import settings
 
+# Batch size for upserts — keeps individual payloads small enough to avoid write timeouts
+_UPSERT_BATCH_SIZE = 50
+
 
 def get_client() -> QdrantClient:
-    return QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+    return QdrantClient(
+        url=settings.qdrant_url,
+        api_key=settings.qdrant_api_key,
+        timeout=120,  # seconds — prevents WriteTimeout on slow/distant connections
+    )
 
 
 def delete_collection_if_exists(client: QdrantClient) -> bool:
@@ -49,6 +56,7 @@ def upsert_chunks(
 ) -> None:
     if not embeddings:
         return
+
     points = [
         PointStruct(
             id=str(uuid.uuid4()),
@@ -57,7 +65,11 @@ def upsert_chunks(
         )
         for vec, payload in zip(embeddings, payloads, strict=True)
     ]
-    client.upsert(collection_name=settings.qdrant_collection, points=points)
+
+    # Send in batches to avoid write timeouts on high-latency connections
+    for i in range(0, len(points), _UPSERT_BATCH_SIZE):
+        batch = points[i : i + _UPSERT_BATCH_SIZE]
+        client.upsert(collection_name=settings.qdrant_collection, points=batch)
 
 
 def search(
