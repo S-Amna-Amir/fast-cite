@@ -2,25 +2,31 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:          #0d0f14;
-  --bg-2:        #13161d;
-  --bg-3:        #1a1e28;
-  --border:      #252a38;
-  --border-soft: #1e2330;
+  /* Softer, more premium base */
+  --bg:          #12151c;   
+  --bg-2:        #181c25;
+  --bg-3:        #202635;
 
-  --accent:      #c8a96e;        /* warm gold — law / authority */
-  --accent-dim:  #9e7e4a;
-  --accent-glow: rgba(200,169,110,.12);
+  --border:      #2c3345;
+  --border-soft: #232938;
 
-  --green:       #4ade80;
-  --green-dim:   rgba(74,222,128,.1);
+  /* Warmer, more elegant gold */
+  --accent:      #d4b377;   
+  --accent-dim:  #a88952;
+  --accent-glow: rgba(212,179,119,.10);
 
-  --text-1:  #f0ece3;
-  --text-2:  #a8a49c;
-  --text-3:  #5c5850;
+  /* Keep green but slightly muted */
+  --green:       #3ecf8e;
+  --green-dim:   rgba(62,207,142,.08);
 
-  --user-bubble: #1f2535;
-  --bot-bubble:  #171b25;
+  /* Better readability (less yellow, more neutral) */
+  --text-1:  #e8e6df;
+  --text-2:  #b7b3a8;
+  --text-3:  #7a766d;
+
+  /* Chat bubbles (important for friendliness) */
+  --user-bubble: #222838;
+  --bot-bubble:  #1a1f2b;
 
   --font-display: 'Syne', sans-serif;
   --font-body:    'DM Sans', sans-serif;
@@ -45,6 +51,7 @@ html, body {
 body {
   display: flex;
   overflow: hidden;
+  background: linear-gradient(180deg, #12151c 0%, #0f1218 100%);
 }
 
 /* ─── Sidebar ───────────────────────────────────────────── */
