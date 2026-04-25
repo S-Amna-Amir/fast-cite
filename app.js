@@ -333,6 +333,121 @@ function getMockResponse(query) {
   };
 }
 
+// ── Structure Recommender Quiz ────────────────────────────────────────────────
+const QUIZ = [
+  {
+    q: "How many founders are starting this business?",
+    options: ["Just me", "2 or more people"]
+  },
+  {
+    q: "Do you have personal assets you want to protect? (savings, property)",
+    options: ["Yes, protect my assets", "No / not sure yet"]
+  },
+  {
+    q: "Are you planning to raise investment or bring in external partners?",
+    options: ["Yes, planning to raise funding", "No, self-funded for now"]
+  }
+];
+
+const QUIZ_LOGIC = (answers) => {
+  const [founders, assets, funding] = answers;
+  if (founders === 1 && assets === 0) return {
+    structure: "SMC (Single Member Company)",
+    reason: "You're a solo founder with assets to protect. SMC gives you limited liability — your personal savings and property stay safe if the business faces debt or legal issues.",
+    steps: ["Register free at eservices.secp.gov.pk", "Prepare your CNIC and address proof", "File MoA + AoA (templates available in FastCite)", "Get your Certificate of Incorporation in 1–2 weeks"],
+    source: "SECP Companies Act 2017 | Section 42"
+  };
+  if (founders === 1 && assets === 1) return {
+    structure: "Sole Proprietorship",
+    reason: "You're testing an idea solo and don't have major assets at risk yet. Sole proprietorship is free, takes 1–5 days, and you only need an NTN from FBR — no SECP registration.",
+    steps: ["Register for NTN at iris.fbr.gov.pk (free)", "Open a business bank account with your NTN", "Start operating — upgrade to SMC when you're ready to scale"],
+    source: "FBR IRIS Portal | Income Tax Ordinance 2001"
+  };
+  if (founders === 0 && funding === 0) return {
+    structure: "Private Limited Company (Pvt Ltd)",
+    reason: "With multiple founders and funding plans, Pvt Ltd is the right structure. It's investor-ready, allows share issuance, and gives all founders limited liability protection.",
+    steps: ["Agree on shareholding split with co-founders", "Register at eservices.secp.gov.pk", "File MoA + AoA with all director CNICs", "Register for NTN after incorporation"],
+    source: "SECP Companies Act 2017 | FBR IRIS Portal"
+  };
+  // default: multiple founders, no funding
+  return {
+    structure: "SMC or Private Limited Company",
+    reason: "With multiple founders but no immediate funding plans, you can start with an SMC if one founder leads, or go straight to Pvt Ltd for a cleaner multi-founder setup.",
+    steps: ["Decide who the primary director/shareholder will be", "For SMC: register at eservices.secp.gov.pk with 1 shareholder", "For Pvt Ltd: gather CNICs of all founders and register together", "Get NTN from FBR after SECP registration"],
+    source: "SECP Companies Act 2017"
+  };
+};
+
+let quizAnswers = [];
+let quizStep = 0;
+
+function startQuiz() {
+  quizAnswers = [];
+  quizStep = 0;
+  // Show welcome message in chat
+  appendBotMessage({
+    answer: "I'll ask you 3 quick questions to recommend the right business structure for you.",
+    steps: [],
+    source: "",
+    warning: null
+  });
+  showQuizQuestion();
+}
+
+function showQuizQuestion() {
+  if (quizStep >= QUIZ.length) {
+    finishQuiz();
+    return;
+  }
+  const q = QUIZ[quizStep];
+  const row = document.createElement('div');
+  row.className = 'message bot-message';
+  row.id = `quiz-step-${quizStep}`;
+  row.innerHTML = `
+    <div class="avatar bot-avatar">⚖</div>
+    <div class="message-body">
+      <div class="message-bubble">
+        <p><strong>Question ${quizStep + 1} of ${QUIZ.length}</strong></p>
+        <p>${q.q}</p>
+        <div class="quiz-options">
+          ${q.options.map((opt, i) => `
+            <button class="quiz-option-btn" onclick="answerQuiz(${i}, this)">
+              ${opt}
+            </button>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+  chatMessages.appendChild(row);
+  scrollToBottom();
+}
+
+function answerQuiz(answerIndex, btn) {
+  // Disable all buttons in this question
+  const questionEl = document.getElementById(`quiz-step-${quizStep}`);
+  questionEl.querySelectorAll('.quiz-option-btn').forEach(b => {
+    b.disabled = true;
+    b.style.opacity = b === btn ? '1' : '0.4';
+  });
+  btn.style.borderColor = 'var(--accent)';
+  btn.style.color = 'var(--accent)';
+
+  quizAnswers.push(answerIndex);
+  quizStep++;
+  setTimeout(showQuizQuestion, 400);
+}
+
+function finishQuiz() {
+  const result = QUIZ_LOGIC(quizAnswers);
+  appendBotMessage({
+    answer: ` Based on your answers, we recommend: **${result.structure}**\n\n${result.reason}`,
+    steps: result.steps,
+    source: result.source,
+    warning: "This is a general recommendation. For complex situations, consult a CA or legal advisor."
+  });
+}
+
 // ─── Out of scope detection ───────────────────────────────────────────────────
 const OUT_OF_SCOPE_KEYWORDS = ['divorce', 'criminal', 'marriage', 'property dispute', 'immigration', 'custody', 'murder', 'accident'];
 
