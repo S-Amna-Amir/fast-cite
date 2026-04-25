@@ -1,15 +1,19 @@
 """
 FastCite RAG Backend
 - Embedding: sentence-transformers (local, free)
-- Vector store: FAISS (in-memory)
+- Vector store: FAISS (in-memory, persisted to disk cache)
 - LLM: Groq (free tier, Llama 3.1 8B)
 - RAG variant: Naive RAG + metadata pre-filtering
 """
+
+from dotenv import load_dotenv
+load_dotenv()   # must be before any os.environ.get calls
 
 import os
 import json
 import re
 import logging
+import pickle
 from pathlib import Path
 from typing import Optional
 
@@ -27,6 +31,7 @@ logger = logging.getLogger(__name__)
 # ── Config ────────────────────────────────────────────────────────────────────
 GROQ_API_KEY   = os.environ.get("GROQ_API_KEY", "")
 KB_PATH        = Path(os.environ.get("KB_PATH", "./fastcite_knowledge_base"))
+CACHE_DIR      = Path(".cache")          # stores embeddings between restarts
 EMBED_MODEL    = "all-MiniLM-L6-v2"
 GROQ_MODEL     = "llama-3.1-8b-instant"
 TOP_K          = 4
@@ -130,10 +135,49 @@ class RAGIndex:
         self.faiss_index: faiss.IndexFlatIP | None = None
         self.embedder: SentenceTransformer | None = None
 
+    def _cache_valid(self, kb_path: Path) -> bool:
+        """Cache is valid if it exists and is newer than every KB file."""
+        cache_index = CACHE_DIR / "faiss.index"
+        cache_chunks = CACHE_DIR / "chunks.pkl"
+        if not cache_index.exists() or not cache_chunks.exists():
+            return False
+        cache_mtime = min(cache_index.stat().st_mtime, cache_chunks.stat().st_mtime)
+        # Invalidate if any KB markdown file is newer than cache
+        for md_file in kb_path.rglob("*.md"):
+            if md_file.stat().st_mtime > cache_mtime:
+                logger.info(f"KB file changed: {md_file.name} — rebuilding cache")
+                return False
+        # Also invalidate if kb_index.json changed
+        idx_file = kb_path / "metadata" / "kb_index.json"
+        if idx_file.exists() and idx_file.stat().st_mtime > cache_mtime:
+            logger.info("kb_index.json changed — rebuilding cache")
+            return False
+        return True
+
+    def _save_cache(self):
+        CACHE_DIR.mkdir(exist_ok=True)
+        faiss.write_index(self.faiss_index, str(CACHE_DIR / "faiss.index"))
+        with open(CACHE_DIR / "chunks.pkl", "wb") as f:
+            pickle.dump(self.chunks, f)
+        logger.info(f"Cache saved to {CACHE_DIR}/ ✓")
+
+    def _load_cache(self):
+        self.faiss_index = faiss.read_index(str(CACHE_DIR / "faiss.index"))
+        with open(CACHE_DIR / "chunks.pkl", "rb") as f:
+            self.chunks = pickle.load(f)
+        logger.info(f"Loaded {len(self.chunks)} chunks from cache ✓")
+
     def build(self, kb_path: Path, doc_index: list[dict]):
         logger.info("Loading embedding model...")
         self.embedder = SentenceTransformer(EMBED_MODEL)
 
+        # ── Use cache if KB hasn't changed ───────────────────────────────────
+        if self._cache_valid(kb_path):
+            logger.info("KB unchanged — loading from disk cache (fast start)")
+            self._load_cache()
+            return
+
+        # ── Full rebuild ──────────────────────────────────────────────────────
         logger.info("Reading and chunking KB documents...")
         all_chunks = []
         for doc_meta in doc_index:
@@ -153,7 +197,7 @@ class RAGIndex:
         logger.info(f"Total chunks: {len(self.chunks)}")
 
         texts = [c["text"] for c in self.chunks]
-        logger.info("Encoding chunks (this takes ~10s on first run)...")
+        logger.info("Encoding chunks (first run — will be cached after this)...")
         embeddings = self.embedder.encode(texts, normalize_embeddings=True, show_progress_bar=True)
         self.embeddings = embeddings.astype(np.float32)
 
@@ -161,6 +205,8 @@ class RAGIndex:
         self.faiss_index = faiss.IndexFlatIP(dim)   # Inner product ≡ cosine on normalized vecs
         self.faiss_index.add(self.embeddings)
         logger.info("FAISS index ready ✓")
+
+        self._save_cache()
 
     def retrieve(self, query: str, top_k: int = TOP_K, keyword_boost_ids: list[str] | None = None) -> list[dict]:
         """
