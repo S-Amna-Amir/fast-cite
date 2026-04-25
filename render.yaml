@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: fastcite-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false          # set this in Render dashboard → never commit to git
+      - key: KB_PATH
+        value: ./fastcite_knowledge_base
+    # Render free tier spins down after 15min inactivity.
+    # The first request after spin-down takes ~30s (embedding model reload).
+    # Acceptable for a test/demo deployment.
