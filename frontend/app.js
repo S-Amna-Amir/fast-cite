@@ -1,5 +1,5 @@
 // ─── Config ─────────────────────────────────────────────────────────────────
-const API_URL = 'http://localhost:8002/ask'; 
+const API_URL = 'https://macey-naissant-magaret.ngrok-free.dev/ask'; 
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let isLoading = false;
