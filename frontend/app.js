@@ -1,5 +1,43 @@
-// ─── Config ─────────────────────────────────────────────────────────────────
-const API_URL = 'https://macey-naissant-magaret.ngrok-free.dev/ask'; 
+// ─── API base resolution ───────────────────────────────────────────────────────
+// Same-origin deploy (uvicorn serves frontend/): default /ask + /health.
+// Cross-origin (e.g. GitHub Pages): set localStorage FASTCITE_API_BASE = "https://your-api.host"
+// OR open with ?api=https://your-api.host (no trailing slash required).
+
+function normalizeApiBase(url) {
+  if (!url || typeof url !== 'string') return '';
+  return url.replace(/\/+$/, '');
+}
+
+function resolveApiBase() {
+  const params = new URLSearchParams(window.location.search);
+  const qp = normalizeApiBase(params.get('api') || '');
+  if (qp) return qp;
+  try {
+    const ls = normalizeApiBase(localStorage.getItem('FASTCITE_API_BASE') || '');
+    if (ls) return ls;
+  } catch (_) { /* ignore */ }
+  return '';
+}
+
+function askUrl() {
+  const base = resolveApiBase();
+  return base ? `${base}/ask` : '/ask';
+}
+
+function healthUrl() {
+  const base = resolveApiBase();
+  return base ? `${base}/health` : '/health';
+}
+
+function mockFallbackEnabled() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('mock') === '1') return true;
+  try {
+    return localStorage.getItem('fastcite_mock') === '1';
+  } catch (_) {
+    return false;
+  }
+}
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let isLoading = false;
@@ -9,7 +47,25 @@ const chatMessages = document.getElementById('chatMessages');
 const userInput    = document.getElementById('userInput');
 const sendBtn      = document.getElementById('sendBtn');
 
+// ─── Backend status (header) ─────────────────────────────────────────────────-
+async function checkBackendHealth() {
+  const el = document.querySelector('.status-text');
+  if (!el) return;
+  el.textContent = 'Checking backend…';
+  try {
+    const r = await fetch(healthUrl(), { method: 'GET' });
+    if (!r.ok) throw new Error('bad status');
+    const j = await r.json();
+    const n = typeof j.chunks_indexed === 'number' ? j.chunks_indexed : null;
+    el.textContent = n != null && n >= 0 ? `Ready · ${n} indexed chunks` : 'Ready';
+  } catch {
+    el.textContent = 'Backend offline — set FASTCITE_API_BASE or run the API locally';
+  }
+}
+
 // ─── Send Message ─────────────────────────────────────────────────────────────
+const SLOW_START_MS = 5000;
+
 async function sendMessage() {
   const query = userInput.value.trim();
   if (!query || isLoading) return;
@@ -28,8 +84,19 @@ async function sendMessage() {
   const typingId = appendTypingIndicator();
   setLoading(true);
 
+  let slowTimer = null;
+  let slowNotified = false;
+  slowTimer = setTimeout(() => {
+    if (!slowNotified && isLoading) {
+      slowNotified = true;
+      appendWakeNote();
+      scrollToBottom();
+    }
+  }, SLOW_START_MS);
+
   try {
-    const response = await fetch(API_URL, {
+    const endpoint = askUrl();
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query }),
@@ -45,16 +112,30 @@ async function sendMessage() {
   } catch (err) {
     removeTypingIndicator(typingId);
 
-    // ── Fallback: backend not connected yet (for demo/development) ──
-    const mock = getMockResponse(query);
+    const mock = mockFallbackEnabled() ? getMockResponse(query) : null;
     if (mock) {
       appendBotMessage(mock);
     } else {
       appendErrorMessage("I'm having trouble connecting to the server. Please try again shortly.");
     }
   } finally {
+    if (slowTimer) clearTimeout(slowTimer);
     setLoading(false);
   }
+}
+
+function appendWakeNote() {
+  const row = document.createElement('div');
+  row.className = 'message bot-message wake-msg';
+  row.innerHTML = `
+    <div class="avatar bot-avatar">⚖</div>
+    <div class="message-body">
+      <div class="message-bubble" style="opacity:0.9;font-size:0.9rem;">
+        <p>Still working — if the backend just woke up from sleep, answers can take 25–35 seconds the first time.</p>
+      </div>
+    </div>
+  `;
+  chatMessages.appendChild(row);
 }
 
 // ─── Validation ───────────────────────────────────────────────────────────────
@@ -239,8 +320,7 @@ function formatAnswer(text) {
   return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 }
 
-// ─── Mock Responses (for demo without backend) ────────────────────────────────
-// Delete or disable this once the backend is running.
+// ─── Mock Responses (optional: ?mock=1 or localStorage fastcite_mock=1) ───────
 function getMockResponse(query) {
   const q = query.toLowerCase();
 
@@ -349,31 +429,42 @@ const QUIZ = [
   }
 ];
 
+/** answer indices per question: 0 or 1 for each selected option button */
 const QUIZ_LOGIC = (answers) => {
-  const [founders, assets, funding] = answers;
-  if (founders === 1 && assets === 0) return {
-    structure: "SMC (Single Member Company)",
-    reason: "You're a solo founder with assets to protect. SMC gives you limited liability — your personal savings and property stay safe if the business faces debt or legal issues.",
-    steps: ["Register free at eservices.secp.gov.pk", "Prepare your CNIC and address proof", "File MoA + AoA (templates available in FastCite)", "Get your Certificate of Incorporation in 1–2 weeks"],
-    source: "SECP Companies Act 2017 | Section 42"
-  };
-  if (founders === 1 && assets === 1) return {
-    structure: "Sole Proprietorship",
-    reason: "You're testing an idea solo and don't have major assets at risk yet. Sole proprietorship is free, takes 1–5 days, and you only need an NTN from FBR — no SECP registration.",
-    steps: ["Register for NTN at iris.fbr.gov.pk (free)", "Open a business bank account with your NTN", "Start operating — upgrade to SMC when you're ready to scale"],
-    source: "FBR IRIS Portal | Income Tax Ordinance 2001"
-  };
-  if (founders === 0 && funding === 0) return {
-    structure: "Private Limited Company (Pvt Ltd)",
-    reason: "With multiple founders and funding plans, Pvt Ltd is the right structure. It's investor-ready, allows share issuance, and gives all founders limited liability protection.",
-    steps: ["Agree on shareholding split with co-founders", "Register at eservices.secp.gov.pk", "File MoA + AoA with all director CNICs", "Register for NTN after incorporation"],
-    source: "SECP Companies Act 2017 | FBR IRIS Portal"
-  };
-  // default: multiple founders, no funding
+  const [iFounders, iAssets, iFunding] = answers;
+  const solo = iFounders === 0;
+  const multi = iFounders === 1;
+  const wantsProtection = iAssets === 0;
+  const wantsFunding = iFunding === 0;
+
+  if (solo && wantsProtection) {
+    return {
+      structure: "SMC (Single Member Company)",
+      reason: "You're a solo founder with assets to protect. SMC gives you limited liability — your personal savings and property stay safer if the business faces debt or legal issues.",
+      steps: ["Register at eservices.secp.gov.pk", "Prepare your CNIC and address proof", "File MoA + AoA (templates available in FastCite)", "Get your Certificate of Incorporation (often within a couple of weeks)"],
+      source: "SECP Companies Act 2017 | Section 42"
+    };
+  }
+  if (solo && !wantsProtection) {
+    return {
+      structure: "Sole Proprietorship",
+      reason: "You're testing an idea solo and don't emphasize liability protection yet. Sole proprietorship is simple: you mainly need an NTN from FBR — no SECP incorporation.",
+      steps: ["Register for NTN at iris.fbr.gov.pk (free)", "Open a business bank account with your NTN", "Start operating — upgrade to SMC/Pvt Ltd when you want limited liability"],
+      source: "FBR IRIS Portal | Income Tax Ordinance 2001"
+    };
+  }
+  if (multi && wantsFunding) {
+    return {
+      structure: "Private Limited Company (Pvt Ltd)",
+      reason: "With multiple founders and plans to raise funds, Pvt Ltd is usually the best fit — investor-ready, shareholding clarity, and limited liability for founders.",
+      steps: ["Agree on shareholding split with co-founders", "Register at eservices.secp.gov.pk", "File MoA + AoA with director CNICs", "Register for NTN after incorporation"],
+      source: "SECP Companies Act 2017 | FBR IRIS Portal"
+    };
+  }
   return {
     structure: "SMC or Private Limited Company",
-    reason: "With multiple founders but no immediate funding plans, you can start with an SMC if one founder leads, or go straight to Pvt Ltd for a cleaner multi-founder setup.",
-    steps: ["Decide who the primary director/shareholder will be", "For SMC: register at eservices.secp.gov.pk with 1 shareholder", "For Pvt Ltd: gather CNICs of all founders and register together", "Get NTN from FBR after SECP registration"],
+    reason: "With multiple founders but no immediate funding plans, either one lead founder uses an SMC-style setup or you incorporate a Pvt Ltd for a clearer multi-founder cap table.",
+    steps: ["Align on roles and eventual equity", "For one lead shareholder: consider SMC via eservices.secp.gov.pk", "For split ownership: Pvt Ltd with all founders as subscribers", "Get NTN from FBR after incorporation"],
     source: "SECP Companies Act 2017"
   };
 };
@@ -473,3 +564,9 @@ const _originalSend = sendMessage;
     await _originalSend();
   };
 })();
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', checkBackendHealth);
+} else {
+  checkBackendHealth();
+}

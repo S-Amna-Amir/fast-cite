@@ -1,101 +1,85 @@
-# FastCite Backend — Deployment Guide
+# FastCite — Pakistan business registration assistant
 
-## Local Development
+Groq-hosted LLM + local **sentence-transformers** embeddings + **FAISS** over the Markdown knowledge base under `fastcite_knowledge_base/`. The FastAPI app at the **repository root** also serves the static UI from [`frontend/`](frontend/) — one process for chat + API.
+
+**Step-by-step from zero:** see [**RUN.md**](RUN.md).
+
+## Local development
 
 ```bash
-# 1. Clone / set up
 python -m venv venv
-source venv/bin/activate      # Windows: venv\Scripts\activate
+# Windows:
+venv\Scripts\activate
+
 pip install -r requirements.txt
 
-# 2. Add your Groq key
-echo "GROQ_API_KEY=gsk_your_key_here" > .env
+# Copy secrets (see .env.example)
+copy .env.example .env    # Windows; then edit .env and set GROQ_API_KEY=
 
-# 4. Run
 uvicorn main:app --reload --port 8002
-# → http://localhost:8002/health   should return {"status":"ok","chunks_indexed":N}
-# → Update frontend/app.js API_URL to http://localhost:8002/ask
 ```
 
-## Deploying Backend to Render (Free)
+Then open **http://localhost:8002/** for the UI, or probe the API directly:
 
-1. Push your repo to GitHub:
-   ```
-   your-repo/
-   ├── main.py
-   ├── requirements.txt
-   ├── render.yaml
-   └── fastcite_knowledge_base/   ← the whole KB folder
-   ```
+- `GET http://localhost:8002/health` → `{"status":"ok","chunks_indexed":…}`
+- `POST http://localhost:8002/ask` with JSON `{"query": "…"}`
 
-2. Go to https://render.com → New → Web Service
-3. Connect your GitHub repo
-4. Render auto-detects render.yaml
-5. In Render dashboard → Environment → Add:
-   - `GROQ_API_KEY` = your Groq key
-6. Deploy → get a URL like `https://fastcite-api.onrender.com`
+First startup may download the embedding model and build `.cache/` (FAISS + chunk payload). Subsequent starts reuse the cache until the KB or `kb_index.json` changes.
 
-**Important:** Render free tier sleeps after 15 min inactivity.
-First request after sleep takes ~25-35s (embedding model cold-start).
-Add this 1-liner to your frontend to show a "waking up..." message if
-the request takes > 5s.
+### Frontend pointing at another API
 
-## Deploying Frontend to GitHub Pages
+If you host the static files elsewhere (for example GitHub Pages), either:
 
-1. Put `index.html`, `app.js`, `style.css` in `/docs` folder (or root)
-2. In `app.js` change:
-   ```js
-   const API_URL = 'https://fastcite-api.onrender.com/ask';
-   ```
-3. GitHub repo → Settings → Pages → Source: main branch / docs folder
-4. Done — free HTTPS hosting at `https://yourusername.github.io/fastcite`
+1. Before loading the app, run in the browser console:  
+   `localStorage.setItem('FASTCITE_API_BASE', 'https://your-render-service.onrender.com')`  
+   then reload — the UI will call that origin for `/health` and `/ask`, **or**
 
-## Repo Structure
+2. Open the app with a query parameter:  
+   `?api=https://your-render-service.onrender.com`
+
+Offline demo replies (no Groq required) are gated: add `?mock=1` to the URL or set `localStorage.setItem('fastcite_mock','1')`.
+
+## Deploy API + UI together (Render)
+
+The repo includes [`render.yaml`](render.yaml): connect the repo, add `GROQ_API_KEY` in the dashboard (mark as secret), deploy. Cold starts on free tier can exceed 25s — the frontend shows an automatic “slow start” hint after five seconds while waiting.
+
+Alternatively, host only **`frontend/`** on GitHub Pages and set **`FASTCITE_API_BASE`** to your deployed API URL using one of the methods above.
+
+## Repo layout
 
 ```
 your-repo/
-├── main.py                         ← FastAPI backend
-├── requirements.txt
-├── render.yaml
+├── main.py                 ← FastAPI: /health, /ask, static frontend/
+├── render.yaml             ← Render (optional)
+├── requirements.txt        ← Root Python deps (Groq, FAISS, ST, FastAPI…)
+├── .env.example
 ├── fastcite_knowledge_base/
-│   ├── metadata/kb_index.json      ← CRITICAL: must exist
-│   ├── fbr/
-│   ├── secp/
-│   ├── comparisons/
-│   └── ...
+│   ├── metadata/kb_index.json
+│   └── …
 └── frontend/
     ├── index.html
     ├── app.js
     └── style.css
 ```
 
-## RAG Architecture
+## Alternate backend
 
-**Variant:** Naive RAG + Metadata Pre-filtering
+[`backend/README.md`](backend/README.md) documents an optional **Qdrant + Gemini** stack — **not** the default path described here.
 
-```
-Query
-  │
-  ├─ Out-of-scope check (keyword list) → early exit if divorce/criminal/etc.
-  │
-  ├─ Keyword → doc_id boost map       → metadata pre-filter using kb_index.json tags
-  │
-  ├─ FAISS semantic search            → cosine similarity on MiniLM embeddings
-  │   (top-4 chunks, boosted if matching pre-filter)
-  │
-  ├─ Context assembly                 → chunk text + source_label injected into prompt
-  │
-  └─ Groq Llama 3.1 8B               → structured JSON output (answer/steps/source/warning)
-```
+## RAG flow
+
+1. Keyword list rejects clearly out-of-scope topics (family/criminal/etc.).
+2. Query keywords optionally boost retrieval from mapped `doc_id`s in [`kb_index.json`](fastcite_knowledge_base/metadata/kb_index.json).
+3. MiniLM cosine search returns top chunks.
+4. Groq Llama writes structured JSON (`answer`, `steps`, `source`, `warning`).
 
 ## Debugging
 
 ```bash
-# Check what chunks were built
 curl http://localhost:8002/health
 
-# Test the /ask endpoint directly
-curl -X POST http://localhost:8002/ask \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Do I need NTN for freelancing?"}'
+curl -X POST http://localhost:8002/ask ^
+  -H "Content-Type: application/json" ^
+  -d "{\"query\": \"Do I need NTN for freelancing?\"}"
 ```
+*(Use `\` continuation on bash/macOS.)*

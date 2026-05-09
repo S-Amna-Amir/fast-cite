@@ -21,6 +21,7 @@ import numpy as np
 import faiss
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 from groq import Groq
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 # ── Config ────────────────────────────────────────────────────────────────────
 GROQ_API_KEY   = os.environ.get("GROQ_API_KEY", "")
 KB_PATH        = Path(os.environ.get("KB_PATH", "./fastcite_knowledge_base"))
+FRONTEND_DIR   = Path(__file__).resolve().parent / "frontend"
 CACHE_DIR      = Path(".cache")          # stores embeddings between restarts
 EMBED_MODEL    = "all-MiniLM-L6-v2"
 GROQ_MODEL     = "llama-3.1-8b-instant"
@@ -391,3 +393,13 @@ async def ask(req: QueryRequest):
 @app.get("/health")
 async def health():
     return {"status": "ok", "chunks_indexed": len(rag_index.chunks)}
+
+
+if FRONTEND_DIR.is_dir():
+    app.mount(
+        "/",
+        StaticFiles(directory=str(FRONTEND_DIR), html=True),
+        name="frontend",
+    )
+else:
+    logger.warning("frontend/ missing — UI not served from this process")

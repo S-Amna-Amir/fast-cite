@@ -2,8 +2,7 @@
 venv/
 env/
 .env
-.env.example
-.gitignore
+**/.env
 
 */__pycache__/
 
