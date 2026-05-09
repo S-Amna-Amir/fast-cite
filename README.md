@@ -41,7 +41,11 @@ Offline demo replies (no Groq required) are gated: add `?mock=1` to the URL or s
 
 ## Deploy API + UI together (Render)
 
-The repo includes [`render.yaml`](render.yaml): connect the repo, add `GROQ_API_KEY` in the dashboard (mark as secret), deploy. Cold starts on free tier can exceed 25s — the frontend shows an automatic “slow start” hint after five seconds while waiting.
+The repo includes [`render.yaml`](render.yaml): connect the repo, add `GROQ_API_KEY` in the dashboard (mark as secret), deploy.
+
+**Python version:** Render’s default is now **3.14**. This project pins **3.11.9** via [`.python-version`](.python-version) and `PYTHON_VERSION` in `render.yaml` so `numpy`/`faiss-cpu` install from wheels instead of compiling for minutes. If you created the service manually, set **Environment → `PYTHON_VERSION` = `3.11.9`** (or redeploy from the blueprint).
+
+Cold starts on free tier can exceed 25s — the frontend shows an automatic “slow start” hint after five seconds while waiting.
 
 Alternatively, host only **`frontend/`** on GitHub Pages and set **`FASTCITE_API_BASE`** to your deployed API URL using one of the methods above.
 

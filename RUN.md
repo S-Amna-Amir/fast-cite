@@ -103,7 +103,7 @@ uvicorn main:app --reload --port 8002
 uvicorn main:app --host 0.0.0.0 --port 8002
 ```
 
-**Render / cloud:** use `uvicorn main:app --host 0.0.0.0 --port $PORT` and set `GROQ_API_KEY` in the host dashboard (see `render.yaml` in this repo).
+**Render / cloud:** use `uvicorn main:app --host 0.0.0.0 --port $PORT` and set `GROQ_API_KEY` in the dashboard. This repo pins **Python 3.11.9** (`.python-version` + `PYTHON_VERSION` in `render.yaml`); without that, Render may use Python 3.14 and **`pip install numpy` builds from source** for a very long time.
 
 ---
 
