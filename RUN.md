@@ -103,7 +103,9 @@ uvicorn main:app --reload --port 8002
 uvicorn main:app --host 0.0.0.0 --port 8002
 ```
 
-**Render / cloud:** use `uvicorn main:app --host 0.0.0.0 --port $PORT` and set `GROQ_API_KEY` in the dashboard. This repo pins **Python 3.11.9** (`.python-version` + `PYTHON_VERSION` in `render.yaml`); without that, Render may use Python 3.14 and **`pip install numpy` builds from source** for a very long time.
+**Render / cloud:** use **`uvicorn main:app --host 0.0.0.0 --port $PORT`** (required so Render detects the listener). Set `GROQ_API_KEY` in the dashboard. This repo pins **Python 3.11.9** (`.python-version` + `PYTHON_VERSION` in `render.yaml`). The Render **build** re-installs **`torch==2.3.1+cpu`** so Linux does not pull the multi‑GB CUDA stack. Free-tier RAM (~512 MiB) is tight: `render.yaml` sets **`FASTCITE_EMBED_MODEL=all-MiniLM-L3-v2`**, **`FASTCITE_ST_BATCH=4`**, and **`TORCH_NUM_THREADS=1`**. Out-of-memory at startup → use a tier with **≥1 GiB RAM** or run the API locally / on another host.
+
+Optional env overrides (same variable names locally): **`FASTCITE_EMBED_MODEL`**, **`FASTCITE_ST_BATCH`**, **`FASTCITE_ST_PROGRESS`**, **`TORCH_NUM_THREADS`**.
 
 ---
 

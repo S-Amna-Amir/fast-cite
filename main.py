@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 load_dotenv()   # must be before any os.environ.get calls
 
 import os
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 import json
 import re
 import logging
@@ -23,7 +25,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
 from groq import Groq
 
 logging.basicConfig(level=logging.INFO)
@@ -34,7 +35,9 @@ GROQ_API_KEY   = os.environ.get("GROQ_API_KEY", "")
 KB_PATH        = Path(os.environ.get("KB_PATH", "./fastcite_knowledge_base"))
 FRONTEND_DIR   = Path(__file__).resolve().parent / "frontend"
 CACHE_DIR      = Path(".cache")          # stores embeddings between restarts
-EMBED_MODEL    = "all-MiniLM-L6-v2"
+EMBED_MODEL    = os.environ.get("FASTCITE_EMBED_MODEL", "all-MiniLM-L6-v2").strip()
+ST_ENCODE_BATCH = max(1, int(os.environ.get("FASTCITE_ST_BATCH", "16")))
+TORCH_THREADS   = max(1, int(os.environ.get("TORCH_NUM_THREADS", "1")))
 GROQ_MODEL     = "llama-3.1-8b-instant"
 TOP_K          = 4
 MAX_CHUNK_TOKENS = 700
@@ -141,7 +144,14 @@ class RAGIndex:
         """Cache is valid if it exists and is newer than every KB file."""
         cache_index = CACHE_DIR / "faiss.index"
         cache_chunks = CACHE_DIR / "chunks.pkl"
+        model_tag = CACHE_DIR / "embed_model.txt"
         if not cache_index.exists() or not cache_chunks.exists():
+            return False
+        if (
+            not model_tag.exists()
+            or model_tag.read_text(encoding="utf-8").strip() != EMBED_MODEL
+        ):
+            logger.info("Embedding model changed — rebuilding KB cache.")
             return False
         cache_mtime = min(cache_index.stat().st_mtime, cache_chunks.stat().st_mtime)
         # Invalidate if any KB markdown file is newer than cache
@@ -161,6 +171,7 @@ class RAGIndex:
         faiss.write_index(self.faiss_index, str(CACHE_DIR / "faiss.index"))
         with open(CACHE_DIR / "chunks.pkl", "wb") as f:
             pickle.dump(self.chunks, f)
+        (CACHE_DIR / "embed_model.txt").write_text(EMBED_MODEL, encoding="utf-8")
         logger.info(f"Cache saved to {CACHE_DIR}/ ✓")
 
     def _load_cache(self):
@@ -170,17 +181,36 @@ class RAGIndex:
         logger.info(f"Loaded {len(self.chunks)} chunks from cache ✓")
 
     def build(self, kb_path: Path, doc_index: list[dict]):
-        logger.info("Loading embedding model...")
-        self.embedder = SentenceTransformer(EMBED_MODEL)
+        """Lazy-import sentence_transformers/torch after env is configured."""
+        import gc
 
-        # ── Use cache if KB hasn't changed ───────────────────────────────────
+        try:
+            import torch
+
+            torch.set_num_threads(TORCH_THREADS)
+            torch.set_num_interop_threads(1)
+        except Exception as e:
+            logger.debug("torch thread limits skipped: %s", e)
+
+        from sentence_transformers import SentenceTransformer
+
         if self._cache_valid(kb_path):
-            logger.info("KB unchanged — loading from disk cache (fast start)")
+            logger.info("KB unchanged — loading from disk cache…")
             self._load_cache()
+            logger.info("Loading embedding model (query encoding only)…")
+            self.embedder = SentenceTransformer(
+                EMBED_MODEL,
+                model_kwargs={"low_cpu_mem_usage": True},
+            )
             return
 
-        # ── Full rebuild ──────────────────────────────────────────────────────
-        logger.info("Reading and chunking KB documents...")
+        logger.info("Loading embedding model (full KB encode)…")
+        self.embedder = SentenceTransformer(
+            EMBED_MODEL,
+            model_kwargs={"low_cpu_mem_usage": True},
+        )
+
+        logger.info("Reading and chunking KB documents…")
         all_chunks = []
         for doc_meta in doc_index:
             rel_path = doc_meta.get("path", "")
@@ -199,8 +229,18 @@ class RAGIndex:
         logger.info(f"Total chunks: {len(self.chunks)}")
 
         texts = [c["text"] for c in self.chunks]
-        logger.info("Encoding chunks (first run — will be cached after this)...")
-        embeddings = self.embedder.encode(texts, normalize_embeddings=True, show_progress_bar=True)
+        logger.info(
+            "Encoding chunks (batch=%s, cached after this)…", ST_ENCODE_BATCH
+        )
+        show_bar = (
+            os.environ.get("FASTCITE_ST_PROGRESS", "").lower() in {"1", "true", "yes"}
+        )
+        embeddings = self.embedder.encode(
+            texts,
+            normalize_embeddings=True,
+            batch_size=ST_ENCODE_BATCH,
+            show_progress_bar=show_bar,
+        )
         self.embeddings = embeddings.astype(np.float32)
 
         dim = self.embeddings.shape[1]
@@ -209,13 +249,19 @@ class RAGIndex:
         logger.info("FAISS index ready ✓")
 
         self._save_cache()
+        gc.collect()
 
     def retrieve(self, query: str, top_k: int = TOP_K, keyword_boost_ids: list[str] | None = None) -> list[dict]:
         """
         Metadata-filtered + semantic retrieval.
         If keyword_boost_ids provided, scores from those doc_ids are boosted.
         """
-        q_emb = self.embedder.encode([query], normalize_embeddings=True).astype(np.float32)
+        q_emb = self.embedder.encode(
+            [query],
+            normalize_embeddings=True,
+            batch_size=1,
+            show_progress_bar=False,
+        ).astype(np.float32)
         scores, indices = self.faiss_index.search(q_emb, min(top_k * 3, len(self.chunks)))
 
         results = []
@@ -392,7 +438,11 @@ async def ask(req: QueryRequest):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "chunks_indexed": len(rag_index.chunks)}
+    return {
+        "status": "ok",
+        "chunks_indexed": len(rag_index.chunks),
+        "embed_model": EMBED_MODEL,
+    }
 
 
 if FRONTEND_DIR.is_dir():

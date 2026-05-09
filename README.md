@@ -47,6 +47,12 @@ The repo includes [`render.yaml`](render.yaml): connect the repo, add `GROQ_API_
 
 Cold starts on free tier can exceed 25s — the frontend shows an automatic “slow start” hint after five seconds while waiting.
 
+**Render checklist:**  
+- **Start command:** must be `uvicorn main:app --host 0.0.0.0 --port $PORT`. If you only run `uvicorn main:app`, Render reports *No open ports detected*.  
+- **Blueprint vs dashboard:** if you pasted a custom Start Command in the dashboard, it **overrides** `render.yaml` — fix or remove it there.
+- **Build:** [`render.yaml`](render.yaml) runs a second `pip install torch==2.3.1+cpu … --force-reinstall` so CUDA wheels are not bundled (otherwise you get gigabyte downloads + higher RAM).
+- **Memory:** loading PyTorch + `sentence-transformers` on the **free** instance (~512 MiB) can still **OOM**. The blueprint sets smaller defaults (`FASTCITE_EMBED_MODEL=all-MiniLM-L3-v2`, `FASTCITE_ST_BATCH=4`, single torch thread). If deploys die at startup after “Loading embedding model…”, upgrade to an instance **with ≥1 GiB RAM** or serve the API elsewhere.
+
 Alternatively, host only **`frontend/`** on GitHub Pages and set **`FASTCITE_API_BASE`** to your deployed API URL using one of the methods above.
 
 ## Repo layout

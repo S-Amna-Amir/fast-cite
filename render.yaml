@@ -1,13 +1,29 @@
 # Render blueprint: Groq + FAISS API at repo root (serves frontend/ too).
+# Dashboard must use the same Start Command (or it overrides this file).
 services:
   - type: web
     name: fastcite
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: |-
+      pip install --upgrade pip setuptools wheel
+      pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+      pip install "torch==2.3.1+cpu" --index-url https://download.pytorch.org/whl/cpu --force-reinstall --no-deps
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: GROQ_API_KEY
         sync: false
       - key: PYTHON_VERSION
         value: "3.11.9"
+      - key: TORCH_NUM_THREADS
+        value: "1"
+      # Smaller model + tiny encode batches reduce RAM (Render free tier is ~512MiB)
+      - key: FASTCITE_EMBED_MODEL
+        value: all-MiniLM-L3-v2
+      - key: FASTCITE_ST_BATCH
+        value: "4"
+    # Notes:
+    # • If the build still pulls CUDA torch then runs OOM, bump to a plan with ≥1GiB RAM or
+    #   prebuild `.cache/` offline and ship it (advanced).
+    # • In the Render dashboard → Start Command must be exactly:
+    #     uvicorn main:app --host 0.0.0.0 --port $PORT
